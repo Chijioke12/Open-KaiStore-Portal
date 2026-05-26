@@ -1,0 +1,21 @@
+{
+  "name": "Open-KaiStore Portal",
+  "short_name": "KaiStore Portal",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#7a4fff",
+  "icons": [
+    {
+      "src": "icons/store_112.png",
+      "sizes": "112x112",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/store_224.png",
+      "sizes": "224x224",
+      "type": "image/png"
+    }
+  ]
+}

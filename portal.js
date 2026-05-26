@@ -7,14 +7,13 @@ const Portal = {
         token: '',
         repo: '',
         branch: 'main',
-        useProxy: true
     },
-    PROXY_BASE: 'https://api.allorigins.win/raw?url=',
 
     init() {
         this.cacheDOM();
         this.bindEvents();
         this.loadConfig();
+        this.registerServiceWorker();
     },
 
     cacheDOM() {
@@ -32,7 +31,6 @@ const Portal = {
         this.progressBar = document.getElementById('progress-bar');
         this.tokenInput = document.getElementById('gh-token');
         this.repoInput = document.getElementById('gh-repo');
-        this.proxyToggle = document.getElementById('use-proxy');
     },
 
     bindEvents() {
@@ -53,24 +51,21 @@ const Portal = {
         
         this.tokenInput.onchange = () => this.saveConfig();
         this.repoInput.onchange = () => this.saveConfig();
-        this.proxyToggle.onchange = () => this.saveConfig();
-    },
-
-    getProxiedUrl(url) {
-        if (!this.proxyToggle.checked) return url;
-        return this.PROXY_BASE + encodeURIComponent(url);
     },
 
     saveConfig() {
         localStorage.setItem('gh-token', this.tokenInput.value);
         localStorage.setItem('gh-repo', this.repoInput.value);
-        localStorage.setItem('use-proxy', this.proxyToggle.checked);
     },
 
     loadConfig() {
         this.tokenInput.value = localStorage.getItem('gh-token') || '';
         this.repoInput.value = localStorage.getItem('gh-repo') || 'Chijioke12/Open-KaiStore-Registry';
-        this.proxyToggle.checked = localStorage.getItem('use-proxy') !== 'false';
+    },
+
+    registerServiceWorker() {
+        if (!('serviceWorker' in navigator)) return;
+        navigator.serviceWorker.register('sw.js').catch(() => {});
     },
 
     async handleFileSelect(file) {
@@ -191,8 +186,7 @@ const Portal = {
         let sha = null;
         try {
             const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
-            const proxiedUrl = this.getProxiedUrl(rawUrl);
-            const res = await fetch(proxiedUrl, {
+            const res = await fetch(rawUrl, {
                 headers: { 'Authorization': `token ${token}` }
             });
             if (res.ok) {
@@ -227,8 +221,7 @@ const Portal = {
 
         // Fetch existing apps.json
         const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
-        const proxiedUrl = this.getProxiedUrl(rawUrl);
-        const res = await fetch(proxiedUrl, {
+        const res = await fetch(rawUrl, {
             headers: { 'Authorization': `token ${token}` }
         });
         
