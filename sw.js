@@ -1,4 +1,4 @@
-const CACHE_NAME = 'open-kaistore-portal-v2';
+const CACHE_NAME = 'open-kaistore-portal-v3';
 const ASSETS = [
   './',
   './index.html',

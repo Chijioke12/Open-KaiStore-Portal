@@ -31,6 +31,11 @@ const Portal = {
         this.progressBar = document.getElementById('progress-bar');
         this.tokenInput = document.getElementById('gh-token');
         this.repoInput = document.getElementById('gh-repo');
+
+        this.loadAppsBtn = document.getElementById('load-apps-btn');
+        this.deleteFilesCheckbox = document.getElementById('delete-files-checkbox');
+        this.manageMessage = document.getElementById('manage-message');
+        this.appsList = document.getElementById('apps-list');
     },
 
     bindEvents() {
@@ -48,6 +53,10 @@ const Portal = {
         };
 
         this.deployBtn.onclick = () => this.deploy();
+
+        if (this.loadAppsBtn) {
+            this.loadAppsBtn.onclick = () => this.loadApps();
+        }
         
         this.tokenInput.onchange = () => this.saveConfig();
         this.repoInput.onchange = () => this.saveConfig();
@@ -230,6 +239,62 @@ const Portal = {
         }
     },
 
+    async getRepoFile(repo, path, token) {
+        const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+        const res = await fetch(url, { headers: { 'Authorization': `token ${token}` } });
+        if (res.status === 404) return { exists: false, sha: null, text: '' };
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err && err.message ? err.message : `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        const content = data && data.content ? atob(data.content) : '';
+        return { exists: true, sha: data.sha || null, text: content };
+    },
+
+    async putRepoFile(repo, path, token, message, base64Content, sha) {
+        const body = { message, content: base64Content };
+        if (typeof sha === 'string' && sha.length) body.sha = sha;
+
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `token ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (res.ok) return;
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err && err.message ? err.message : 'Unknown error');
+    },
+
+    async deleteRepoFile(repo, path, token, message) {
+        const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+        const getRes = await fetch(url, { headers: { 'Authorization': `token ${token}` } });
+        if (getRes.status === 404) return;
+        if (!getRes.ok) {
+            const err = await getRes.json().catch(() => ({}));
+            throw new Error(err && err.message ? err.message : 'Unknown error');
+        }
+        const data = await getRes.json();
+        const sha = data && data.sha ? data.sha : null;
+        if (!sha) return;
+
+        const delRes = await fetch(url, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `token ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ message, sha })
+        });
+        if (delRes.ok) return;
+        const err = await delRes.json().catch(() => ({}));
+        throw new Error(err && err.message ? err.message : 'Unknown error');
+    },
+
     async updateRegistry(repo, token, zipPath, iconUrl) {
         const path = 'apps.json';
 
@@ -306,6 +371,144 @@ const Portal = {
                 return;
             }
             throw e;
+        }
+    },
+
+    setManageMessage(text, type) {
+        if (!this.manageMessage) return;
+        this.manageMessage.textContent = text || '';
+        this.manageMessage.className = 'manage-message ' + (type || '');
+    },
+
+    renderAppsManager(apps) {
+        if (!this.appsList) return;
+        this.appsList.innerHTML = '';
+
+        if (!apps.length) {
+            this.appsList.innerHTML = '<div class="error">No apps found in registry.</div>';
+            return;
+        }
+
+        for (const app of apps) {
+            const row = document.createElement('div');
+            row.className = 'app-row';
+            const safeName = app && app.name ? app.name : '(Unnamed)';
+            const safeId = app && app.id ? app.id : '';
+            const safeAuthor = app && app.author ? app.author : '';
+            const icon = app && app.icon ? app.icon : '';
+
+            row.innerHTML = `
+                <img src="${icon}" alt="">
+                <div class="meta">
+                    <div class="name">${safeName}</div>
+                    <div class="id">${safeId}</div>
+                    <div class="author">${safeAuthor}</div>
+                </div>
+                <button class="btn danger" type="button">Delete</button>
+            `;
+
+            const btn = row.querySelector('button');
+            btn.onclick = () => this.deleteAppFromRegistry(safeId);
+            this.appsList.appendChild(row);
+        }
+    },
+
+    async loadApps() {
+        const token = this.tokenInput.value.trim();
+        const repo = this.repoInput.value.trim();
+        if (!token || !repo) {
+            this.setManageMessage('Set your GitHub token and repo first.', 'error');
+            return;
+        }
+
+        this.setManageMessage('Loading apps...', 'info');
+        try {
+            const file = await this.getRepoFile(repo, 'apps.json', token);
+            if (!file.exists) {
+                this.renderAppsManager([]);
+                this.setManageMessage('apps.json not found in repo.', 'error');
+                return;
+            }
+            const parsed = JSON.parse(file.text || '{}');
+            const apps = (parsed && Array.isArray(parsed.apps)) ? parsed.apps : [];
+            this.renderAppsManager(apps);
+            this.setManageMessage(`Loaded ${apps.length} app(s).`, 'success');
+        } catch (e) {
+            this.setManageMessage('Failed to load apps: ' + (e && e.message ? e.message : 'Unknown error'), 'error');
+        }
+    },
+
+    extractRepoPathFromRawUrl(repo, url) {
+        if (!url || typeof url !== 'string') return null;
+        // Supports .../main/<path> and .../master/<path>
+        const re = new RegExp(`^https:\\/\\/raw\\.githubusercontent\\.com\\/${repo.replace('/', '\\/')}\\/(main|master)\\/(.+)$`);
+        const m = url.match(re);
+        return m ? m[2] : null;
+    },
+
+    async deleteAppFromRegistry(appId) {
+        const token = this.tokenInput.value.trim();
+        const repo = this.repoInput.value.trim();
+        if (!token || !repo) {
+            this.setManageMessage('Set your GitHub token and repo first.', 'error');
+            return;
+        }
+        if (!appId) {
+            this.setManageMessage('App id is missing; cannot delete.', 'error');
+            return;
+        }
+
+        const alsoDeleteFiles = !!(this.deleteFilesCheckbox && this.deleteFilesCheckbox.checked);
+        const confirmMsg = alsoDeleteFiles
+            ? `Delete "${appId}" from apps.json and delete its ZIP/icon files from the repo?`
+            : `Delete "${appId}" from apps.json?`;
+        if (!confirm(confirmMsg)) return;
+
+        this.setManageMessage('Deleting app...', 'info');
+
+        try {
+            const file = await this.getRepoFile(repo, 'apps.json', token);
+            if (!file.exists) throw new Error('apps.json not found in repo');
+
+            let parsed = {};
+            try { parsed = JSON.parse(file.text || '{}'); } catch (e) { parsed = {}; }
+            const apps = (parsed && Array.isArray(parsed.apps)) ? parsed.apps : [];
+            const target = apps.find((a) => a && a.id === appId) || null;
+            const nextApps = apps.filter((a) => !(a && a.id === appId));
+            if (nextApps.length === apps.length) {
+                this.setManageMessage('App not found in apps.json.', 'error');
+                return;
+            }
+
+            if (alsoDeleteFiles && target) {
+                const zipPath = this.extractRepoPathFromRawUrl(repo, target.download_url);
+                const iconPath = this.extractRepoPathFromRawUrl(repo, target.icon);
+                const msg = `Delete files for ${appId}`;
+                if (zipPath) await this.deleteRepoFile(repo, zipPath, token, msg);
+                if (iconPath) await this.deleteRepoFile(repo, iconPath, token, msg);
+            }
+
+            const updatedBase64 = btoa(JSON.stringify({ apps: nextApps }, null, 2));
+            try {
+                await this.putRepoFile(repo, 'apps.json', token, `Delete ${appId} from registry`, updatedBase64, file.sha);
+            } catch (e) {
+                const msg = (e && e.message) ? e.message : '';
+                if (/does not match/i.test(msg) || /sha/i.test(msg)) {
+                    const fresh = await this.getRepoFile(repo, 'apps.json', token);
+                    const freshParsed = JSON.parse(fresh.text || '{}');
+                    const freshApps = (freshParsed && Array.isArray(freshParsed.apps)) ? freshParsed.apps : [];
+                    const filtered = freshApps.filter((a) => !(a && a.id === appId));
+                    const freshBase64 = btoa(JSON.stringify({ apps: filtered }, null, 2));
+                    await this.putRepoFile(repo, 'apps.json', token, `Delete ${appId} from registry`, freshBase64, fresh.sha);
+                } else {
+                    throw e;
+                }
+            }
+
+            await this.loadApps();
+            this.setManageMessage(`Deleted "${appId}".`, 'success');
+        } catch (e) {
+            this.setManageMessage('Delete failed: ' + (e && e.message ? e.message : 'Unknown error'), 'error');
         }
     },
 

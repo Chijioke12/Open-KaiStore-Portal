@@ -53,13 +53,26 @@
             <button id="deploy-btn" class="btn primary">Deploy to GitHub</button>
         </section>
 
-        <section id="status-section" class="hidden">
-            <div id="status-message"></div>
-            <div class="progress-bar-container">
-                <div id="progress-bar" class="progress-bar"></div>
-            </div>
-        </section>
-    </div>
+	        <section id="status-section" class="hidden">
+	            <div id="status-message"></div>
+	            <div class="progress-bar-container">
+	                <div id="progress-bar" class="progress-bar"></div>
+	            </div>
+	        </section>
+
+	        <section id="manage-section">
+	            <h2>4. Manage Apps</h2>
+	            <div class="manage-controls">
+	                <button id="load-apps-btn" class="btn">Load Apps</button>
+	                <label class="checkbox">
+	                    <input type="checkbox" id="delete-files-checkbox">
+	                    Also delete ZIP + icon files
+	                </label>
+	            </div>
+	            <div id="manage-message" class="manage-message"></div>
+	            <div id="apps-list" class="apps-list"></div>
+	        </section>
+	    </div>
 
     <script src="portal.js"></script>
 </body>
