@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open-KaiStore Portal</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- JSZip for extraction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Open-KaiStore Portal</h1>
+            <p>Deploy KaiOS apps directly to your GitHub Registry</p>
+        </header>
+
+        <section id="setup">
+            <h2>1. Configuration</h2>
+            <div class="input-group">
+                <label for="gh-token">GitHub Personal Access Token</label>
+                <input type="password" id="gh-token" placeholder="ghp_xxxxxxxxxxxx">
+                <small>Required to push to your repository. <a href="https://github.com/settings/tokens" target="_blank">Create one here</a>.</small>
+            </div>
+            <div class="input-group">
+                <label for="gh-repo">Registry Repo</label>
+                <input type="text" id="gh-repo" value="Chijioke12/Open-KaiStore-Registry">
+            </div>
+        </section>
+
+        <section id="upload-section">
+            <h2>2. Upload App</h2>
+            <div id="drop-zone" class="drop-zone">
+                <p>Drag & Drop ZIP file or click to select</p>
+                <input type="file" id="zip-input" accept=".zip" hidden>
+            </div>
+            <div id="file-info" class="hidden">
+                <p>Selected: <span id="file-name"></span></p>
+            </div>
+        </section>
+
+        <section id="preview-section" class="hidden">
+            <h2>3. Preview Metadata</h2>
+            <div class="preview-card">
+                <img id="preview-icon" src="" alt="Icon" class="hidden">
+                <div class="preview-details">
+                    <h3 id="preview-name">App Name</h3>
+                    <p id="preview-desc">Description will appear here.</p>
+                </div>
+            </div>
+            <button id="deploy-btn" class="btn primary">Deploy to GitHub</button>
+        </section>
+
+        <section id="status-section" class="hidden">
+            <div id="status-message"></div>
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+        </section>
+    </div>
+
+    <script src="portal.js"></script>
+</body>
+</html>
