@@ -146,6 +146,10 @@ small {
     background: var(--primary-dark);
 }
 
+.btn:hover {
+    filter: brightness(0.98);
+}
+
 .progress-bar-container {
     height: 8px;
     background: #eee;

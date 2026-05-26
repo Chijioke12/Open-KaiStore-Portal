@@ -36,6 +36,11 @@ const Portal = {
         this.deleteFilesCheckbox = document.getElementById('delete-files-checkbox');
         this.manageMessage = document.getElementById('manage-message');
         this.appsList = document.getElementById('apps-list');
+
+        this.hostedManifestUrlInput = document.getElementById('hosted-manifest-url');
+        this.packagedZipUrlInput = document.getElementById('packaged-zip-url');
+        this.installHostedBtn = document.getElementById('install-hosted-btn');
+        this.installPackagedBtn = document.getElementById('install-packaged-btn');
     },
 
     bindEvents() {
@@ -56,6 +61,13 @@ const Portal = {
 
         if (this.loadAppsBtn) {
             this.loadAppsBtn.onclick = () => this.loadApps();
+        }
+
+        if (this.installHostedBtn) {
+            this.installHostedBtn.onclick = () => this.installFromUrl('hosted');
+        }
+        if (this.installPackagedBtn) {
+            this.installPackagedBtn.onclick = () => this.installFromUrl('packaged');
         }
         
         this.tokenInput.onchange = () => this.saveConfig();
@@ -521,6 +533,40 @@ const Portal = {
             this.setManageMessage(`Deleted "${appId}".`, 'success');
         } catch (e) {
             this.setManageMessage('Delete failed: ' + (e && e.message ? e.message : 'Unknown error'), 'error');
+        }
+    },
+
+    installFromUrl(type) {
+        try {
+            if (!navigator.mozApps) {
+                alert('mozApps API not available on this device/browser.');
+                return;
+            }
+
+            const url = type === 'hosted'
+                ? (this.hostedManifestUrlInput ? this.hostedManifestUrlInput.value.trim() : '')
+                : (this.packagedZipUrlInput ? this.packagedZipUrlInput.value.trim() : '');
+
+            if (!url) {
+                alert('Please provide a URL first.');
+                return;
+            }
+
+            const method = type === 'hosted' ? 'install' : 'installPackage';
+            const fn = navigator.mozApps[method];
+            if (typeof fn !== 'function') {
+                alert(`navigator.mozApps.${method} is not supported on this device.`);
+                return;
+            }
+
+            const req = fn.call(navigator.mozApps, url);
+            req.onsuccess = () => alert('Installation started.');
+            req.onerror = function() {
+                const name = this.error && this.error.name ? this.error.name : 'UnknownError';
+                alert('Installation failed: ' + name);
+            };
+        } catch (e) {
+            alert('Installation failed: ' + (e && e.message ? e.message : String(e)));
         }
     },
 

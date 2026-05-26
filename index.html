@@ -72,6 +72,23 @@
 	            <div id="manage-message" class="manage-message"></div>
 	            <div id="apps-list" class="apps-list"></div>
 	        </section>
+
+	        <section id="install-section">
+	            <h2>5. Install From URL</h2>
+	            <div class="input-group">
+	                <label for="hosted-manifest-url">Hosted app manifest URL</label>
+	                <input type="url" id="hosted-manifest-url" placeholder="https://example.com/manifest.webapp">
+	                <small>Installs with <code>navigator.mozApps.install()</code>.</small>
+	            </div>
+	            <button id="install-hosted-btn" class="btn">Install Hosted App</button>
+
+	            <div class="input-group" style="margin-top: 12px;">
+	                <label for="packaged-zip-url">Packaged app ZIP URL</label>
+	                <input type="url" id="packaged-zip-url" placeholder="https://example.com/app.zip">
+	                <small>Installs with <code>navigator.mozApps.installPackage()</code> (if supported).</small>
+	            </div>
+	            <button id="install-packaged-btn" class="btn">Install Packaged App</button>
+	        </section>
 	    </div>
 
     <script src="portal.js"></script>
