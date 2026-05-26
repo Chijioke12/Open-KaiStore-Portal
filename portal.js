@@ -182,92 +182,130 @@ const Portal = {
     },
 
     async uploadToGitHub(repo, path, content, token) {
-        // First, try to get existing file to get SHA (if updating)
-        let sha = null;
-        try {
-            const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
-            const res = await fetch(rawUrl, {
-                headers: { 'Authorization': `token ${token}` }
-            });
-            if (res.ok) {
+        const getSha = async () => {
+            try {
+                const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+                const res = await fetch(rawUrl, { headers: { 'Authorization': `token ${token}` } });
+                if (!res.ok) return null;
                 const data = await res.json();
-                sha = data.sha;
+                return data.sha || null;
+            } catch (e) {
+                return null;
             }
-        } catch (e) {}
+        };
 
-        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `token ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
+        const putOnce = async (sha) => {
+            const body = {
                 message: `Add/Update ${path}`,
                 content: content.split(',')[1], // remove data:xxx/xxx;base64,
-                sha: sha
-            })
-        });
+            };
+            if (typeof sha === 'string' && sha.length) body.sha = sha;
+            const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
 
-        if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.message);
+            if (res.ok) return;
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err && err.message ? err.message : 'Unknown error');
+        };
+
+        // First attempt with current SHA (if the file exists)
+        let sha = await getSha();
+        try {
+            await putOnce(sha);
+        } catch (e) {
+            // If the file changed between fetch and update, refetch SHA and retry once
+            const msg = (e && e.message) ? e.message : '';
+            if (/does not match/i.test(msg) || /sha/i.test(msg)) {
+                sha = await getSha();
+                await putOnce(sha);
+                return;
+            }
+            throw e;
         }
     },
 
     async updateRegistry(repo, token, zipPath, iconUrl) {
         const path = 'apps.json';
-        let sha = null;
-        let apps = [];
 
-        // Fetch existing apps.json
-        const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
-        const res = await fetch(rawUrl, {
-            headers: { 'Authorization': `token ${token}` }
-        });
-        
-        if (res.ok) {
-            const data = await res.json();
-            sha = data.sha;
-            const content = atob(data.content);
-            apps = JSON.parse(content).apps;
-        }
+        const fetchAppsJson = async () => {
+            let sha = null;
+            let apps = [];
 
-        // Add or update app entry
-        const appEntry = {
-            id: this.appMetadata.name.toLowerCase().replace(/\s+/g, '-'),
-            name: this.appMetadata.name,
-            author: this.appMetadata.author,
-            description: this.appMetadata.description,
-            icon: iconUrl,
-            type: 'packaged',
-            download_url: `https://raw.githubusercontent.com/${repo}/main/${zipPath}`
+            const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+            const res = await fetch(rawUrl, { headers: { 'Authorization': `token ${token}` } });
+
+            if (res.ok) {
+                const data = await res.json();
+                sha = data.sha || null;
+                const content = atob(data.content || '');
+                apps = JSON.parse(content).apps || [];
+            }
+
+            return { sha, apps };
         };
 
-        const existingIndex = apps.findIndex(a => a.id === appEntry.id);
-        if (existingIndex > -1) {
-            apps[existingIndex] = appEntry;
-        } else {
-            apps.push(appEntry);
-        }
+        const buildUpdatedContent = (apps) => {
+            const appEntry = {
+                id: this.appMetadata.name.toLowerCase().replace(/\s+/g, '-'),
+                name: this.appMetadata.name,
+                author: this.appMetadata.author,
+                description: this.appMetadata.description,
+                icon: iconUrl,
+                type: 'packaged',
+                download_url: `https://raw.githubusercontent.com/${repo}/main/${zipPath}`
+            };
 
-        const updatedContent = btoa(JSON.stringify({ apps: apps }, null, 2));
+            const existingIndex = apps.findIndex(a => a.id === appEntry.id);
+            if (existingIndex > -1) {
+                apps[existingIndex] = appEntry;
+            } else {
+                apps.push(appEntry);
+            }
 
-        const updateRes = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `token ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
+            return btoa(JSON.stringify({ apps: apps }, null, 2));
+        };
+
+        const putAppsJson = async (sha, updatedContent) => {
+            const body = {
                 message: `Update registry with ${this.appMetadata.name}`,
                 content: updatedContent,
-                sha: sha
-            })
-        });
+            };
+            if (typeof sha === 'string' && sha.length) body.sha = sha;
+            const updateRes = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
 
-        if (!updateRes.ok) {
-            const err = await updateRes.json();
-            throw new Error(err.message);
+            if (updateRes.ok) return;
+            const err = await updateRes.json().catch(() => ({}));
+            throw new Error(err && err.message ? err.message : 'Unknown error');
+        };
+
+        // Attempt 1
+        let { sha, apps } = await fetchAppsJson();
+        let updatedContent = buildUpdatedContent(apps);
+        try {
+            await putAppsJson(sha, updatedContent);
+        } catch (e) {
+            // If apps.json changed remotely between fetch and update, refetch and retry once
+            const msg = (e && e.message) ? e.message : '';
+            if (/does not match/i.test(msg) || /sha/i.test(msg)) {
+                ({ sha, apps } = await fetchAppsJson());
+                updatedContent = buildUpdatedContent(apps);
+                await putAppsJson(sha, updatedContent);
+                return;
+            }
+            throw e;
         }
     },
 
