@@ -6,8 +6,10 @@ const Portal = {
     githubConfig: {
         token: '',
         repo: '',
-        branch: 'main'
+        branch: 'main',
+        useProxy: true
     },
+    PROXY_BASE: 'https://api.allorigins.win/raw?url=',
 
     init() {
         this.cacheDOM();
@@ -30,6 +32,7 @@ const Portal = {
         this.progressBar = document.getElementById('progress-bar');
         this.tokenInput = document.getElementById('gh-token');
         this.repoInput = document.getElementById('gh-repo');
+        this.proxyToggle = document.getElementById('use-proxy');
     },
 
     bindEvents() {
@@ -50,16 +53,24 @@ const Portal = {
         
         this.tokenInput.onchange = () => this.saveConfig();
         this.repoInput.onchange = () => this.saveConfig();
+        this.proxyToggle.onchange = () => this.saveConfig();
+    },
+
+    getProxiedUrl(url) {
+        if (!this.proxyToggle.checked) return url;
+        return this.PROXY_BASE + encodeURIComponent(url);
     },
 
     saveConfig() {
         localStorage.setItem('gh-token', this.tokenInput.value);
         localStorage.setItem('gh-repo', this.repoInput.value);
+        localStorage.setItem('use-proxy', this.proxyToggle.checked);
     },
 
     loadConfig() {
         this.tokenInput.value = localStorage.getItem('gh-token') || '';
         this.repoInput.value = localStorage.getItem('gh-repo') || 'Chijioke12/Open-KaiStore-Registry';
+        this.proxyToggle.checked = localStorage.getItem('use-proxy') !== 'false';
     },
 
     async handleFileSelect(file) {
@@ -179,7 +190,9 @@ const Portal = {
         // First, try to get existing file to get SHA (if updating)
         let sha = null;
         try {
-            const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+            const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+            const proxiedUrl = this.getProxiedUrl(rawUrl);
+            const res = await fetch(proxiedUrl, {
                 headers: { 'Authorization': `token ${token}` }
             });
             if (res.ok) {
@@ -213,7 +226,9 @@ const Portal = {
         let apps = [];
 
         // Fetch existing apps.json
-        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+        const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+        const proxiedUrl = this.getProxiedUrl(rawUrl);
+        const res = await fetch(proxiedUrl, {
             headers: { 'Authorization': `token ${token}` }
         });
         
