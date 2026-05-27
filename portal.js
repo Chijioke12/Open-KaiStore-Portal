@@ -270,26 +270,31 @@ const Portal = {
         this.updateProgress(10);
 
         try {
-            // 1. Upload ZIP
-            this.showStatus('Uploading ZIP...', 'info');
+            // 1. Prepare files for atomic commit
+            const filesToCommit = [];
+
+            // A. ZIP File
+            this.showStatus('Preparing ZIP...', 'info');
             const zipBase64 = await this.toBase64(this.zipFile);
             const zipPath = `apps/${this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase()}.zip`;
-            await this.uploadToGitHub(repo, zipPath, zipBase64, token);
-            this.updateProgress(40);
+            const zipBlobSha = await this.createBlob(repo, token, zipBase64);
+            filesToCommit.push({ path: zipPath, sha: zipBlobSha });
+            this.updateProgress(30);
 
-            // 2. Upload Icon
+            // B. Icon
             let iconUrl = '';
             if (this.appMetadata.iconBlob) {
-                this.showStatus('Uploading Icon...', 'info');
+                this.showStatus('Preparing Icon...', 'info');
                 const iconBase64 = await this.toBase64(this.appMetadata.iconBlob);
                 const iconPath = `icons/${this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase()}-${this.appMetadata.iconName}`;
-                await this.uploadToGitHub(repo, iconPath, iconBase64, token);
+                const iconBlobSha = await this.createBlob(repo, token, iconBase64);
+                filesToCommit.push({ path: iconPath, sha: iconBlobSha });
                 iconUrl = `https://raw.githubusercontent.com/${repo}/main/${iconPath}`;
             }
-            this.updateProgress(70);
+            this.updateProgress(50);
 
-            // 3. GENERATE AND UPLOAD MINI-MANIFEST FOR KAIOS
-            this.showStatus('Uploading Mini-Manifest...', 'info');
+            // C. Mini-Manifest
+            this.showStatus('Preparing Mini-Manifest...', 'info');
             const appId = this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
             const miniManifest = {
                 name: this.appMetadata.name,
@@ -301,21 +306,176 @@ const Portal = {
             };
             const manifestBase64 = "data:application/json;base64," + this.encodeUnicode(JSON.stringify(miniManifest, null, 2));
             const manifestPath = `manifests/${appId}.webapp`;
-            await this.uploadToGitHub(repo, manifestPath, manifestBase64, token);
-            this.updateProgress(85);
+            const manifestBlobSha = await this.createBlob(repo, token, manifestBase64);
+            filesToCommit.push({ path: manifestPath, sha: manifestBlobSha });
+            this.updateProgress(70);
 
-            // 4. Update apps.json
-            this.showStatus('Updating Registry...', 'info');
-            await this.updateRegistry(repo, token, iconUrl, { 
+            // D. Updated apps.json
+            this.showStatus('Updating Registry data...', 'info');
+            const registryData = await this.getUpdatedRegistryData(repo, token, iconUrl, { 
                 type: 'packaged',
                 download_url: `https://raw.githubusercontent.com/${repo}/main/${zipPath}`
             });
+            const registryBase64 = "data:application/json;base64," + registryData.base64;
+            const registryBlobSha = await this.createBlob(repo, token, registryBase64);
+            filesToCommit.push({ path: 'apps.json', sha: registryBlobSha });
+            this.updateProgress(85);
+
+            // 2. Commit all changes at once
+            this.showStatus('Committing changes to GitHub...', 'info');
+            await this.commitChanges(repo, token, 'main', `Deploy ${this.appMetadata.name}`, filesToCommit);
             this.updateProgress(100);
 
-            this.showStatus('Success! Packaged app deployed to your store.', 'success');
+            this.showStatus('Success! App deployed atomically to your store.', 'success');
         } catch (err) {
             this.showStatus('Deployment failed: ' + err.message, 'error');
         }
+    },
+
+    async createBlob(repo, token, base64WithPrefix) {
+        const content = base64WithPrefix.includes(',') ? base64WithPrefix.split(',')[1] : base64WithPrefix;
+        const res = await fetch(`https://api.github.com/repos/${repo}/git/blobs`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `token ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ content, encoding: 'base64' })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err && err.message ? err.message : `Blob creation failed: ${res.status}`);
+        }
+        const data = await res.json();
+        return data.sha;
+    },
+
+    async commitChanges(repo, token, branch, message, files) {
+        // 1. Get current branch reference
+        const refUrl = `https://api.github.com/repos/${repo}/git/refs/heads/${branch}?t=${Date.now()}`;
+        const refRes = await fetch(refUrl, { headers: { 'Authorization': `token ${token}` } });
+        if (!refRes.ok) throw new Error('Failed to get branch ref');
+        const refData = await refRes.json();
+        const baseCommitSha = refData.object.sha;
+
+        // 2. Get current commit's tree
+        const commitUrl = `https://api.github.com/repos/${repo}/git/commits/${baseCommitSha}`;
+        const commitRes = await fetch(commitUrl, { headers: { 'Authorization': `token ${token}` } });
+        if (!commitRes.ok) throw new Error('Failed to get base commit');
+        const commitData = await commitRes.json();
+        const baseTreeSha = commitData.tree.sha;
+
+        // 3. Create a new tree (as a delta from base tree)
+        const treeItems = files.map(f => ({
+            path: f.path,
+            mode: '100644',
+            type: 'blob',
+            sha: f.sha
+        }));
+        const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `token ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                base_tree: baseTreeSha,
+                tree: treeItems
+            })
+        });
+        if (!treeRes.ok) throw new Error('Failed to create new tree');
+        const treeData = await treeRes.json();
+        const newTreeSha = treeData.sha;
+
+        // 4. Create the commit
+        const newCommitRes = await fetch(`https://api.github.com/repos/${repo}/git/commits`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `token ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                message,
+                tree: newTreeSha,
+                parents: [baseCommitSha]
+            })
+        });
+        if (!newCommitRes.ok) throw new Error('Failed to create new commit');
+        const newCommitData = await newCommitRes.json();
+        const newCommitSha = newCommitData.sha;
+
+        // 5. Update the reference
+        const updateRefRes = await fetch(`https://api.github.com/repos/${repo}/git/refs/heads/${branch}`, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `token ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ sha: newCommitSha })
+        });
+        if (!updateRefRes.ok) {
+            const err = await updateRefRes.json().catch(() => ({}));
+            // If conflict (someone else pushed), retry once with fresh data
+            if (updateRefRes.status === 422) {
+                return this.commitChanges(repo, token, branch, message, files);
+            }
+            throw new Error(err && err.message ? err.message : 'Failed to update branch ref');
+        }
+    },
+
+    async getUpdatedRegistryData(repo, token, iconUrl, extra) {
+        const path = 'apps.json';
+
+        const getPagesManifestUrl = (appId) => {
+            const parts = (repo || '').split('/');
+            if (parts.length !== 2) return '';
+            const owner = parts[0];
+            const repoName = parts[1];
+            return `https://${owner}.github.io/${repoName}/manifests/${appId}.webapp`;
+        };
+
+        const fetchAppsJson = async () => {
+            const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}?t=${Date.now()}`;
+            const res = await fetch(rawUrl, { headers: { 'Authorization': `token ${token}` } });
+            let apps = [];
+            if (res.ok) {
+                const data = await res.json();
+                const content = data.content ? this.decodeUnicode(data.content) : '';
+                try {
+                    apps = JSON.parse(content).apps || [];
+                } catch (e) { apps = []; }
+            }
+            return apps;
+        };
+
+        const apps = await fetchAppsJson();
+        const appId = this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
+        const appEntry = {
+            id: appId,
+            name: this.appMetadata.name,
+            author: this.appMetadata.author,
+            description: this.appMetadata.description,
+            icon: iconUrl,
+            type: extra.type,
+            ...extra
+        };
+
+        if (extra.type === 'packaged' && !appEntry.manifest_url) {
+            appEntry.manifest_url = getPagesManifestUrl(appId);
+        }
+
+        const existingIndex = apps.findIndex(a => a && a.id === appEntry.id);
+        if (existingIndex > -1) {
+            apps[existingIndex] = appEntry;
+        } else {
+            apps.push(appEntry);
+        }
+
+        const newContent = JSON.stringify({ apps: apps }, null, 2);
+        return {
+            text: newContent,
+            base64: this.encodeUnicode(newContent)
+        };
     },
 
     async deployHosted() {
