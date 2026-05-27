@@ -625,7 +625,10 @@ const Portal = {
 
             const getPagesManifestUrl = (id) => {
                 const parts = (repo || '').split('/');
-                return `https://${parts[0].toLowerCase()}.github.io/${parts[1].toLowerCase()}/manifests/${id}.webapp`;
+                if (parts.length !== 2) return '';
+                // Use raw.githack.com proxy instead of github.io
+                // This completely bypasses the need to enable GitHub Pages
+                return `https://raw.githack.com/${parts[0]}/${parts[1]}/main/manifests/${id}.webapp`;
             };
 
             if (extra.type === 'packaged' && !appEntry.manifest_url) {
