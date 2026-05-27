@@ -608,39 +608,11 @@ const Portal = {
     },
 
     async updateRegistry(repo, token, iconUrl, extra) {
-        const path = 'apps.json';
-
-        const getPagesManifestUrl = (appId) => {
-            const parts = (repo || '').split('/');
-            if (parts.length !== 2) return '';
-            const owner = parts[0];
-            const repoName = parts[1];
-            return `https://${owner}.github.io/${repoName}/manifests/${appId}.webapp`;
-        };
-
-        const fetchAppsJson = async () => {
-            let sha = null;
-            let apps = [];
-
-            const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}?t=${Date.now()}`;
-            const res = await fetch(rawUrl, { headers: { 'Authorization': `token ${token}` } });
-
-            if (res.ok) {
-                const data = await res.json();
-                sha = data.sha || null;
-                const content = data.content ? this.decodeUnicode(data.content) : '';
-                try {
-                    apps = JSON.parse(content).apps || [];
-                } catch (e) {
-                    apps = [];
-                }
-            }
-
-            return { sha, apps };
-        };
-
-        const buildUpdatedContent = (apps) => {
+        this.showStatus('Updating Registry...', 'info');
+        try {
+            const apps = await this.fetchAppsJson(repo, token);
             const appId = this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
+            
             const appEntry = {
                 id: appId,
                 name: this.appMetadata.name,
@@ -651,7 +623,11 @@ const Portal = {
                 ...extra
             };
 
-            // Add generated manifest_url for packaged apps if not provided
+            const getPagesManifestUrl = (id) => {
+                const parts = (repo || '').split('/');
+                return `https://${parts[0].toLowerCase()}.github.io/${parts[1].toLowerCase()}/manifests/${id}.webapp`;
+            };
+
             if (extra.type === 'packaged' && !appEntry.manifest_url) {
                 appEntry.manifest_url = getPagesManifestUrl(appId);
             }
@@ -663,127 +639,31 @@ const Portal = {
                 apps.push(appEntry);
             }
 
-            return this.encodeUnicode(JSON.stringify({ apps: apps }, null, 2));
-        };
+            const newContent = JSON.stringify({ apps: apps }, null, 2);
+            const registryBase64 = "data:application/json;base64," + this.encodeUnicode(newContent);
+            const registryBlobSha = await this.createBlob(repo, token, registryBase64);
+            
+            await this.commitChanges(repo, token, 'main', `Registry Update: ${this.appMetadata.name}`, [{
+                path: 'apps.json',
+                sha: registryBlobSha
+            }]);
 
-        const putAppsJson = async (sha, updatedContent) => {
-            const body = {
-                message: `Update registry with ${this.appMetadata.name}`,
-                content: updatedContent,
-            };
-            if (typeof sha === 'string' && sha.length) body.sha = sha;
-            const updateRes = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-                method: 'PUT',
-                headers: {
-                    'Authorization': `token ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(body)
-            });
+            this.updateProgress(100);
+            this.showStatus(`Success! ${extra.type === 'hosted' ? 'Hosted' : 'Packaged'} app registered.`, 'success');
+        } catch (err) {
+            this.showStatus('Registry update failed: ' + err.message, 'error');
+            throw err;
+        }
+    },
 
-            if (updateRes.ok) return;
-            const err = await updateRes.json().catch(() => ({}));
-            throw new Error(err && err.message ? err.message : 'Unknown error');
-        };
-
-        // Attempt 1
-        let { sha, apps } = await fetchAppsJson();
-        let updatedContent = buildUpdatedContent(apps);
+    async fetchAppsJson(repo, token) {
+        const rawUrl = `https://api.github.com/repos/${repo}/contents/apps.json?t=${Date.now()}`;
+        const res = await fetch(rawUrl, { headers: { 'Authorization': `token ${token}` } });
+        if (!res.ok) return [];
+        const data = await res.json();
         try {
-            await putAppsJson(sha, updatedContent);
-        } catch (e) {
-            const msg = (e && e.message) ? e.message : '';
-            if (/does not match/i.test(msg) || /sha/i.test(msg)) {
-                ({ sha, apps } = await fetchAppsJson());
-                updatedContent = buildUpdatedContent(apps);
-                await putAppsJson(sha, updatedContent);
-                return;
-            }
-            throw e;
-        }
-    },
-
-    setManageMessage(text, type) {
-        if (!this.manageMessage) return;
-        this.manageMessage.textContent = text || '';
-        this.manageMessage.className = 'manage-message ' + (type || '');
-    },
-
-    renderAppsManager(apps) {
-        if (!this.appsList) return;
-        this.appsList.innerHTML = '';
-
-        if (!apps.length) {
-            this.appsList.innerHTML = '<div class="error">No apps found in registry.</div>';
-            return;
-        }
-
-        for (const app of apps) {
-            const row = document.createElement('div');
-            row.className = 'app-row';
-            const safeName = app && app.name ? app.name : '(Unnamed)';
-            const safeId = app && app.id ? app.id : '';
-            const safeAuthor = app && app.author ? app.author : '';
-            const icon = app && app.icon ? app.icon : '';
-
-            row.innerHTML = `
-                <img src="${icon}" alt="">
-                <div class="meta">
-                    <div class="name">${safeName}</div>
-                    <div class="id">${safeId}</div>
-                    <div class="author">${safeAuthor}</div>
-                </div>
-                <button class="btn danger" type="button">Delete</button>
-            `;
-
-            const btn = row.querySelector('button');
-            btn.onclick = () => this.deleteAppFromRegistry(safeId);
-            this.appsList.appendChild(row);
-        }
-    },
-
-    async loadApps() {
-        const token = this.tokenInput.value.trim();
-        const repo = this.repoInput.value.trim();
-        if (!token || !repo) {
-            this.setManageMessage('Set your GitHub token and repo first.', 'error');
-            return;
-        }
-
-        this.setManageMessage('Loading apps...', 'info');
-        try {
-            const file = await this.getRepoFile(repo, 'apps.json', token);
-            if (!file.exists) {
-                this.renderAppsManager([]);
-                this.setManageMessage('apps.json not found in repo.', 'error');
-                return;
-            }
-            const parsed = JSON.parse(file.text || '{}');
-            const apps = (parsed && Array.isArray(parsed.apps)) ? parsed.apps : [];
-            this.renderAppsManager(apps);
-            this.setManageMessage(`Loaded ${apps.length} app(s).`, 'success');
-        } catch (e) {
-            this.setManageMessage('Failed to load apps: ' + (e && e.message ? e.message : 'Unknown error'), 'error');
-        }
-    },
-
-    extractRepoPathFromRawUrl(repo, url) {
-        if (!url || typeof url !== 'string') return null;
-        
-        // 1. Raw GitHub URL
-        const re = new RegExp(`^https:\\/\\/raw\\.githubusercontent\\.com\\/${repo.replace('/', '\\/')}\\/(main|master)\\/(.+)$`);
-        const m = url.match(re);
-        if (m) return m[2];
-
-        // 2. GitHub Pages URL
-        const parts = repo.split('/');
-        const owner = parts[0].toLowerCase();
-        const repoName = parts[1].toLowerCase();
-        const pagesRe = new RegExp(`^https:\\/\\/${owner}\\.github\\.io\\/${repoName}\\/(.+)$`, 'i');
-        const m2 = url.match(pagesRe);
-        if (m2) return m2[1];
-
-        return null;
+            return JSON.parse(this.decodeUnicode(data.content)).apps || [];
+        } catch (e) { return []; }
     },
 
     async deleteAppFromRegistry(appId) {
@@ -793,58 +673,36 @@ const Portal = {
             this.setManageMessage('Set your GitHub token and repo first.', 'error');
             return;
         }
-        if (!appId) {
-            this.setManageMessage('App id is missing; cannot delete.', 'error');
-            return;
-        }
-
+        
         const alsoDeleteFiles = !!(this.deleteFilesCheckbox && this.deleteFilesCheckbox.checked);
-        const confirmMsg = alsoDeleteFiles
-            ? `Delete "${appId}" from apps.json and delete its ZIP/icon/manifest files from the repo?`
-            : `Delete "${appId}" from apps.json?`;
-        if (!confirm(confirmMsg)) return;
+        if (!confirm(`Delete "${appId}" from apps.json${alsoDeleteFiles ? ' and delete associated files?' : '?'}`)) return;
 
         this.setManageMessage('Deleting app...', 'info');
 
         try {
-            const file = await this.getRepoFile(repo, 'apps.json', token);
-            if (!file.exists) throw new Error('apps.json not found in repo');
+            const apps = await this.fetchAppsJson(repo, token);
+            const target = apps.find(a => a && a.id === appId);
+            const nextApps = apps.filter(a => !(a && a.id === appId));
 
-            let parsed = {};
-            try { parsed = JSON.parse(file.text || '{}'); } catch (e) { parsed = {}; }
-            const apps = (parsed && Array.isArray(parsed.apps)) ? parsed.apps : [];
-            const target = apps.find((a) => a && a.id === appId) || null;
-            const nextApps = apps.filter((a) => !(a && a.id === appId));
-            if (nextApps.length === apps.length) {
-                this.setManageMessage('App not found in apps.json.', 'error');
-                return;
-            }
+            // 1. Prepare registry update
+            const registryContent = JSON.stringify({ apps: nextApps }, null, 2);
+            const registryBase64 = "data:application/json;base64," + this.encodeUnicode(registryContent);
+            const registryBlobSha = await this.createBlob(repo, token, registryBase64);
+            
+            const filesToCommit = [{ path: 'apps.json', sha: registryBlobSha }];
 
+            // 2. Perform atomic commit for registry
+            await this.commitChanges(repo, token, 'main', `Registry Delete: ${appId}`, filesToCommit);
+
+            // 3. Delete files individually
             if (alsoDeleteFiles && target) {
-                const zipPath = this.extractRepoPathFromRawUrl(repo, target.download_url);
-                const iconPath = this.extractRepoPathFromRawUrl(repo, target.icon);
-                const manifestPath = this.extractRepoPathFromRawUrl(repo, target.manifest_url);
-                const msg = `Delete files for ${appId}`;
-                if (zipPath) await this.deleteRepoFile(repo, zipPath, token, msg);
-                if (iconPath) await this.deleteRepoFile(repo, iconPath, token, msg);
-                if (manifestPath && target.type === 'packaged') await this.deleteRepoFile(repo, manifestPath, token, msg);
-            }
+                const paths = [
+                    this.extractRepoPathFromRawUrl(repo, target.download_url),
+                    this.extractRepoPathFromRawUrl(repo, target.icon),
+                    target.type === 'packaged' ? this.extractRepoPathFromRawUrl(repo, target.manifest_url) : null
+                ].filter(Boolean);
 
-            const updatedBase64 = this.encodeUnicode(JSON.stringify({ apps: nextApps }, null, 2));
-            try {
-                await this.putRepoFile(repo, 'apps.json', token, `Delete ${appId} from registry`, updatedBase64, file.sha);
-            } catch (e) {
-                const msg = (e && e.message) ? e.message : '';
-                if (/does not match/i.test(msg) || /sha/i.test(msg)) {
-                    const fresh = await this.getRepoFile(repo, 'apps.json', token);
-                    const freshParsed = JSON.parse(fresh.text || '{}');
-                    const freshApps = (freshParsed && Array.isArray(freshParsed.apps)) ? freshParsed.apps : [];
-                    const filtered = freshApps.filter((a) => !(a && a.id === appId));
-                    const freshBase64 = this.encodeUnicode(JSON.stringify({ apps: filtered }, null, 2));
-                    await this.putRepoFile(repo, 'apps.json', token, `Delete ${appId} from registry`, freshBase64, fresh.sha);
-                } else {
-                    throw e;
-                }
+                for (const path of paths) await this.deleteRepoFile(repo, path, token, `Delete ${appId} files`);
             }
 
             await this.loadApps();
