@@ -26,6 +26,15 @@ const Portal = {
         this.previewName = document.getElementById('preview-name');
         this.previewDesc = document.getElementById('preview-desc');
         this.deployBtn = document.getElementById('deploy-btn');
+
+        this.deployHostedUrlInput = document.getElementById('deploy-hosted-url');
+        this.fetchHostedBtn = document.getElementById('fetch-hosted-btn');
+        this.hostedPreviewSection = document.getElementById('hosted-preview-section');
+        this.hostedPreviewIcon = document.getElementById('hosted-preview-icon');
+        this.hostedPreviewName = document.getElementById('hosted-preview-name');
+        this.hostedPreviewDesc = document.getElementById('hosted-preview-desc');
+        this.deployHostedBtn = document.getElementById('deploy-hosted-btn');
+
         this.statusSection = document.getElementById('status-section');
         this.statusMessage = document.getElementById('status-message');
         this.progressBar = document.getElementById('progress-bar');
@@ -59,6 +68,9 @@ const Portal = {
 
         this.deployBtn.onclick = () => this.deploy();
 
+        this.fetchHostedBtn.onclick = () => this.handleHostedFetch();
+        this.deployHostedBtn.onclick = () => this.deployHosted();
+
         if (this.loadAppsBtn) {
             this.loadAppsBtn.onclick = () => this.loadApps();
         }
@@ -72,6 +84,31 @@ const Portal = {
         
         this.tokenInput.onchange = () => this.saveConfig();
         this.repoInput.onchange = () => this.saveConfig();
+
+        window.addEventListener('keydown', (e) => this.handleKeydown(e));
+    },
+
+    handleKeydown(e) {
+        const focusables = Array.from(document.querySelectorAll('input, button, .drop-zone'));
+        let index = focusables.indexOf(document.activeElement);
+
+        switch(e.key) {
+            case 'ArrowDown':
+                index = (index + 1) % focusables.length;
+                focusables[index].focus();
+                e.preventDefault();
+                break;
+            case 'ArrowUp':
+                index = (index - 1 + focusables.length) % focusables.length;
+                focusables[index].focus();
+                e.preventDefault();
+                break;
+            case 'Enter':
+                if (document.activeElement === this.dropZone) {
+                    this.zipInput.click();
+                }
+                break;
+        }
     },
 
     saveConfig() {
@@ -82,6 +119,14 @@ const Portal = {
     loadConfig() {
         this.tokenInput.value = localStorage.getItem('gh-token') || '';
         this.repoInput.value = localStorage.getItem('gh-repo') || 'Chijioke12/Open-KaiStore-Registry';
+        
+        // Hide install section if not on KaiOS
+        const installSection = document.getElementById('install-section');
+        const androidNote = document.getElementById('android-note');
+        if (!navigator.mozApps) {
+            if (installSection) installSection.classList.add('hidden');
+            if (androidNote) androidNote.classList.remove('hidden');
+        }
     },
 
     registerServiceWorker() {
@@ -96,8 +141,10 @@ const Portal = {
         }
 
         this.zipFile = file;
+        this.appMetadata = null; // Clear previous
         this.fileName.textContent = file.name;
         this.fileInfo.classList.remove('hidden');
+        this.previewSection.classList.add('hidden');
         this.showStatus('Extracting metadata...', 'info');
 
         try {
@@ -116,7 +163,8 @@ const Portal = {
                 description: manifest.description,
                 author: manifest.developer ? manifest.developer.name : 'Unknown',
                 version: manifest.version,
-                icons: manifest.icons
+                icons: manifest.icons,
+                type: 'packaged'
             };
 
             // Extract the first available icon
@@ -124,7 +172,7 @@ const Portal = {
                 const iconSizes = Object.keys(manifest.icons).sort((a, b) => b - a);
                 const bestIconPath = manifest.icons[iconSizes[0]];
                 // Remove leading slash if present
-                const cleanPath = bestIconPath.startsWith('/') ? bestIconPath.slice(1) : bestIconPath;
+                const cleanPath = bestIconPath.startsWith('/') ? (bestIconPath.slice(1)) : bestIconPath;
                 const iconFile = zip.file(cleanPath);
                 
                 if (iconFile) {
@@ -142,11 +190,60 @@ const Portal = {
         }
     },
 
+    async handleHostedFetch() {
+        const url = this.deployHostedUrlInput.value.trim();
+        if (!url) {
+            alert('Please enter a manifest URL.');
+            return;
+        }
+
+        this.appMetadata = null;
+        this.hostedPreviewSection.classList.add('hidden');
+        this.showStatus('Fetching manifest...', 'info');
+
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const manifest = await res.json();
+
+            this.appMetadata = {
+                name: manifest.name,
+                description: manifest.description,
+                author: manifest.developer ? manifest.developer.name : 'Unknown',
+                version: manifest.version,
+                icons: manifest.icons,
+                type: 'hosted',
+                manifest_url: url
+            };
+
+            if (manifest.icons) {
+                const iconSizes = Object.keys(manifest.icons).sort((a, b) => b - a);
+                const iconUrl = manifest.icons[iconSizes[0]];
+                // Resolve relative icon URL
+                const absoluteIconUrl = new URL(iconUrl, url).href;
+                this.hostedPreviewIcon.src = absoluteIconUrl;
+                this.hostedPreviewIcon.classList.remove('hidden');
+                this.appMetadata.iconUrl = absoluteIconUrl;
+            }
+
+            this.renderHostedPreview();
+            this.statusSection.classList.add('hidden');
+        } catch (err) {
+            this.showStatus('Error: ' + err.message, 'error');
+        }
+    },
+
     renderPreview() {
         this.previewName.textContent = this.appMetadata.name;
         this.previewDesc.textContent = this.appMetadata.description || 'No description provided.';
         this.previewSection.classList.remove('hidden');
         this.statusSection.classList.add('hidden');
+    },
+
+    renderHostedPreview() {
+        this.hostedPreviewName.textContent = this.appMetadata.name;
+        this.hostedPreviewDesc.textContent = this.appMetadata.description || 'No description provided.';
+        this.hostedPreviewSection.classList.remove('hidden');
     },
 
     showStatus(msg, type) {
@@ -161,8 +258,8 @@ const Portal = {
     },
 
     async deploy() {
-        const token = this.tokenInput.value;
-        const repo = this.repoInput.value;
+        const token = this.tokenInput.value.trim();
+        const repo = this.repoInput.value.trim();
 
         if (!token || !repo) {
             alert('Please provide GitHub Token and Repo.');
@@ -176,7 +273,7 @@ const Portal = {
             // 1. Upload ZIP
             this.showStatus('Uploading ZIP...', 'info');
             const zipBase64 = await this.toBase64(this.zipFile);
-            const zipPath = `apps/${this.appMetadata.name.replace(/\s+/g, '-').toLowerCase()}.zip`;
+            const zipPath = `apps/${this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase()}.zip`;
             await this.uploadToGitHub(repo, zipPath, zipBase64, token);
             this.updateProgress(40);
 
@@ -185,18 +282,61 @@ const Portal = {
             if (this.appMetadata.iconBlob) {
                 this.showStatus('Uploading Icon...', 'info');
                 const iconBase64 = await this.toBase64(this.appMetadata.iconBlob);
-                const iconPath = `icons/${this.appMetadata.name.replace(/\s+/g, '-').toLowerCase()}-${this.appMetadata.iconName}`;
+                const iconPath = `icons/${this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase()}-${this.appMetadata.iconName}`;
                 await this.uploadToGitHub(repo, iconPath, iconBase64, token);
                 iconUrl = `https://raw.githubusercontent.com/${repo}/main/${iconPath}`;
             }
             this.updateProgress(70);
 
-            // 3. Update apps.json
+            // 3. GENERATE AND UPLOAD MINI-MANIFEST FOR KAIOS
+            this.showStatus('Uploading Mini-Manifest...', 'info');
+            const appId = this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
+            const miniManifest = {
+                name: this.appMetadata.name,
+                package_path: `https://raw.githubusercontent.com/${repo}/main/${zipPath}`,
+                version: this.appMetadata.version || "1.0",
+                developer: {
+                    name: this.appMetadata.author || "Unknown"
+                }
+            };
+            const manifestBase64 = "data:application/json;base64," + this.encodeUnicode(JSON.stringify(miniManifest, null, 2));
+            const manifestPath = `manifests/${appId}.webapp`;
+            await this.uploadToGitHub(repo, manifestPath, manifestBase64, token);
+            this.updateProgress(85);
+
+            // 4. Update apps.json
             this.showStatus('Updating Registry...', 'info');
-            await this.updateRegistry(repo, token, zipPath, iconUrl);
+            await this.updateRegistry(repo, token, iconUrl, { 
+                type: 'packaged',
+                download_url: `https://raw.githubusercontent.com/${repo}/main/${zipPath}`
+            });
             this.updateProgress(100);
 
-            this.showStatus('Success! App deployed to your store.', 'success');
+            this.showStatus('Success! Packaged app deployed to your store.', 'success');
+        } catch (err) {
+            this.showStatus('Deployment failed: ' + err.message, 'error');
+        }
+    },
+
+    async deployHosted() {
+        const token = this.tokenInput.value.trim();
+        const repo = this.repoInput.value.trim();
+
+        if (!token || !repo) {
+            alert('Please provide GitHub Token and Repo.');
+            return;
+        }
+
+        this.showStatus('Updating Registry...', 'info');
+        this.updateProgress(50);
+
+        try {
+            await this.updateRegistry(repo, token, this.appMetadata.iconUrl, {
+                type: 'hosted',
+                manifest_url: this.appMetadata.manifest_url
+            });
+            this.updateProgress(100);
+            this.showStatus('Success! Hosted app registered in your store.', 'success');
         } catch (err) {
             this.showStatus('Deployment failed: ' + err.message, 'error');
         }
@@ -260,7 +400,7 @@ const Portal = {
             throw new Error(err && err.message ? err.message : `HTTP ${res.status}`);
         }
         const data = await res.json();
-        const content = data && data.content ? atob(data.content) : '';
+        const content = data && data.content ? this.decodeUnicode(data.content) : '';
         return { exists: true, sha: data.sha || null, text: content };
     },
 
@@ -307,16 +447,15 @@ const Portal = {
         throw new Error(err && err.message ? err.message : 'Unknown error');
     },
 
-    async updateRegistry(repo, token, zipPath, iconUrl) {
+    async updateRegistry(repo, token, iconUrl, extra) {
         const path = 'apps.json';
 
         const getPagesManifestUrl = (appId) => {
-            // GitHub Pages URL format: https://<owner>.github.io/<repo>/...
             const parts = (repo || '').split('/');
             if (parts.length !== 2) return '';
             const owner = parts[0];
             const repoName = parts[1];
-            return `https://${owner}.github.io/${repoName}/manifests/${appId}.json`;
+            return `https://${owner}.github.io/${repoName}/manifests/${appId}.webapp`;
         };
 
         const fetchAppsJson = async () => {
@@ -329,35 +468,42 @@ const Portal = {
             if (res.ok) {
                 const data = await res.json();
                 sha = data.sha || null;
-                const content = atob(data.content || '');
-                apps = JSON.parse(content).apps || [];
+                const content = data.content ? this.decodeUnicode(data.content) : '';
+                try {
+                    apps = JSON.parse(content).apps || [];
+                } catch (e) {
+                    apps = [];
+                }
             }
 
             return { sha, apps };
         };
 
         const buildUpdatedContent = (apps) => {
-            const appId = this.appMetadata.name.toLowerCase().replace(/\s+/g, '-');
+            const appId = this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
             const appEntry = {
                 id: appId,
                 name: this.appMetadata.name,
                 author: this.appMetadata.author,
                 description: this.appMetadata.description,
                 icon: iconUrl,
-                type: 'packaged',
-                download_url: `https://raw.githubusercontent.com/${repo}/main/${zipPath}`,
-                // Optional: GitHub Pages-served mini-manifest (generated by registry repo Actions)
-                manifest_url: getPagesManifestUrl(appId)
+                type: extra.type,
+                ...extra
             };
 
-            const existingIndex = apps.findIndex(a => a.id === appEntry.id);
+            // Add generated manifest_url for packaged apps if not provided
+            if (extra.type === 'packaged' && !appEntry.manifest_url) {
+                appEntry.manifest_url = getPagesManifestUrl(appId);
+            }
+
+            const existingIndex = apps.findIndex(a => a && a.id === appEntry.id);
             if (existingIndex > -1) {
                 apps[existingIndex] = appEntry;
             } else {
                 apps.push(appEntry);
             }
 
-            return btoa(JSON.stringify({ apps: apps }, null, 2));
+            return this.encodeUnicode(JSON.stringify({ apps: apps }, null, 2));
         };
 
         const putAppsJson = async (sha, updatedContent) => {
@@ -386,7 +532,6 @@ const Portal = {
         try {
             await putAppsJson(sha, updatedContent);
         } catch (e) {
-            // If apps.json changed remotely between fetch and update, refetch and retry once
             const msg = (e && e.message) ? e.message : '';
             if (/does not match/i.test(msg) || /sha/i.test(msg)) {
                 ({ sha, apps } = await fetchAppsJson());
@@ -464,7 +609,6 @@ const Portal = {
 
     extractRepoPathFromRawUrl(repo, url) {
         if (!url || typeof url !== 'string') return null;
-        // Supports .../main/<path> and .../master/<path>
         const re = new RegExp(`^https:\\/\\/raw\\.githubusercontent\\.com\\/${repo.replace('/', '\\/')}\\/(main|master)\\/(.+)$`);
         const m = url.match(re);
         return m ? m[2] : null;
@@ -512,7 +656,7 @@ const Portal = {
                 if (iconPath) await this.deleteRepoFile(repo, iconPath, token, msg);
             }
 
-            const updatedBase64 = btoa(JSON.stringify({ apps: nextApps }, null, 2));
+            const updatedBase64 = this.encodeUnicode(JSON.stringify({ apps: nextApps }, null, 2));
             try {
                 await this.putRepoFile(repo, 'apps.json', token, `Delete ${appId} from registry`, updatedBase64, file.sha);
             } catch (e) {
@@ -522,7 +666,7 @@ const Portal = {
                     const freshParsed = JSON.parse(fresh.text || '{}');
                     const freshApps = (freshParsed && Array.isArray(freshParsed.apps)) ? freshParsed.apps : [];
                     const filtered = freshApps.filter((a) => !(a && a.id === appId));
-                    const freshBase64 = btoa(JSON.stringify({ apps: filtered }, null, 2));
+                    const freshBase64 = this.encodeUnicode(JSON.stringify({ apps: filtered }, null, 2));
                     await this.putRepoFile(repo, 'apps.json', token, `Delete ${appId} from registry`, freshBase64, fresh.sha);
                 } else {
                     throw e;
@@ -568,6 +712,18 @@ const Portal = {
         } catch (e) {
             alert('Installation failed: ' + (e && e.message ? e.message : String(e)));
         }
+    },
+
+    encodeUnicode(str) {
+        return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) => {
+            return String.fromCharCode('0x' + p1);
+        }));
+    },
+
+    decodeUnicode(str) {
+        return decodeURIComponent(Array.prototype.map.call(atob(str.replace(/\s/g, '')), (c) => {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
     },
 
     toBase64(file) {

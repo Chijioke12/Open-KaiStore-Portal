@@ -14,7 +14,10 @@
     <div class="container">
         <header>
             <h1>Open-KaiStore Portal</h1>
-            <p>Deploy KaiOS apps directly to your GitHub Registry</p>
+            <p>Deploy KaiOS apps to your GitHub Registry</p>
+            <div id="android-note" class="info-box hidden">
+                <strong>Android User:</strong> You can use this portal to upload apps to your registry, but you cannot install KaiOS apps directly on this device.
+            </div>
         </header>
 
         <section id="setup">
@@ -31,26 +34,46 @@
         </section>
 
         <section id="upload-section">
-            <h2>2. Upload App</h2>
-            <div id="drop-zone" class="drop-zone">
+            <h2>2. Deployment (Packaged App)</h2>
+            <div id="drop-zone" class="drop-zone" tabindex="0">
                 <p>Drag & Drop ZIP file or click to select</p>
                 <input type="file" id="zip-input" accept=".zip" hidden>
             </div>
             <div id="file-info" class="hidden">
                 <p>Selected: <span id="file-name"></span></p>
             </div>
+
+            <div id="preview-section" class="hidden">
+                <div class="preview-card">
+                    <img id="preview-icon" src="" alt="Icon" class="hidden">
+                    <div class="preview-details">
+                        <h3 id="preview-name">App Name</h3>
+                        <p id="preview-desc">Description will appear here.</p>
+                    </div>
+                </div>
+                <button id="deploy-btn" class="btn primary">Deploy Package to GitHub</button>
+            </div>
         </section>
 
-        <section id="preview-section" class="hidden">
-            <h2>3. Preview Metadata</h2>
-            <div class="preview-card">
-                <img id="preview-icon" src="" alt="Icon" class="hidden">
-                <div class="preview-details">
-                    <h3 id="preview-name">App Name</h3>
-                    <p id="preview-desc">Description will appear here.</p>
-                </div>
+        <section id="hosted-deploy-section">
+            <h2>3. Deployment (Hosted App)</h2>
+            <div class="input-group">
+                <label for="deploy-hosted-url">Manifest URL</label>
+                <input type="url" id="deploy-hosted-url" placeholder="https://example.com/manifest.webapp">
+                <small>The URL to the <code>manifest.webapp</code> file.</small>
             </div>
-            <button id="deploy-btn" class="btn primary">Deploy to GitHub</button>
+            <button id="fetch-hosted-btn" class="btn">Fetch Metadata</button>
+
+            <div id="hosted-preview-section" class="hidden">
+                <div class="preview-card">
+                    <img id="hosted-preview-icon" src="" alt="Icon" class="hidden">
+                    <div class="preview-details">
+                        <h3 id="hosted-preview-name">App Name</h3>
+                        <p id="hosted-preview-desc">Description will appear here.</p>
+                    </div>
+                </div>
+                <button id="deploy-hosted-btn" class="btn primary">Deploy Hosted App to GitHub</button>
+            </div>
         </section>
 
 	        <section id="status-section" class="hidden">
@@ -61,7 +84,7 @@
 	        </section>
 
 	        <section id="manage-section">
-	            <h2>4. Manage Apps</h2>
+	            <h2>Manage Apps</h2>
 	            <div class="manage-controls">
 	                <button id="load-apps-btn" class="btn">Load Apps</button>
 	                <label class="checkbox">
@@ -74,20 +97,28 @@
 	        </section>
 
 	        <section id="install-section">
-	            <h2>5. Install From URL</h2>
+	            <h2>Test on Device</h2>
 	            <div class="input-group">
-	                <label for="hosted-manifest-url">Hosted app manifest URL</label>
+	                <label for="hosted-manifest-url">URL to hosted app manifest:</label>
 	                <input type="url" id="hosted-manifest-url" placeholder="https://example.com/manifest.webapp">
-	                <small>Installs with <code>navigator.mozApps.install()</code>.</small>
+	                <small>Direct URL to the <code>manifest.webapp</code> of a hosted app.</small>
 	            </div>
-	            <button id="install-hosted-btn" class="btn">Install Hosted App</button>
+	            <button id="install-hosted-btn" class="btn">Install hosted app</button>
 
 	            <div class="input-group" style="margin-top: 12px;">
-	                <label for="packaged-zip-url">Packaged app ZIP URL</label>
-	                <input type="url" id="packaged-zip-url" placeholder="https://example.com/app.zip">
-	                <small>Installs with <code>navigator.mozApps.installPackage()</code> (if supported).</small>
+	                <label for="packaged-zip-url">URL to packaged app manifest:</label>
+	                <input type="url" id="packaged-zip-url" placeholder="https://example.com/manifest.webapp">
+	                <small>URL to a manifest containing a <code>package_path</code> to the ZIP.</small>
 	            </div>
-	            <button id="install-packaged-btn" class="btn">Install Packaged App</button>
+	            <button id="install-packaged-btn" class="btn">Install packaged app</button>
+
+                <div class="info-box" style="margin-top: 15px; background: #fffde7; border-color: #fff9c4; color: #5d4037;">
+                    <strong>Tip:</strong> To test a packaged ZIP, create a temporary <code>manifest.webapp</code> file that looks like this:
+                    <pre style="font-size: 10px; margin: 5px 0; background: #fafafa; padding: 5px; overflow: auto;">{
+  "name": "App Name",
+  "package_path": "https://example.com/app.zip"
+}</pre>
+                </div>
 	        </section>
 	    </div>
 

@@ -90,12 +90,33 @@ small {
     transition: background 0.3s;
 }
 
+.drop-zone:focus,
+.drop-zone.active {
+    background: rgba(122, 79, 255, 0.1);
+    outline: 2px solid var(--primary-dark);
+}
+
 .drop-zone:hover {
     background: rgba(122, 79, 255, 0.05);
 }
 
 .hidden {
     display: none;
+}
+
+#file-info {
+    margin-top: 15px;
+    padding: 10px;
+    background: #f0f0f0;
+    border-radius: 8px;
+    font-size: 14px;
+    text-align: center;
+}
+
+#preview-section {
+    margin-top: 25px;
+    padding-top: 25px;
+    border-top: 1px solid #eee;
 }
 
 .preview-card {
@@ -173,6 +194,17 @@ small {
 
 .success { color: var(--success); }
 .error { color: var(--error); }
+
+.info-box {
+    background: #e1f5fe;
+    border: 1px solid #b3e5fc;
+    color: #01579b;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-top: 10px;
+    text-align: left;
+}
 
 #manage-section .btn {
     width: auto;
