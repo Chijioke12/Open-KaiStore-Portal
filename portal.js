@@ -345,7 +345,7 @@ const Portal = {
     async uploadToGitHub(repo, path, content, token) {
         const getSha = async () => {
             try {
-                const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+                const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}?t=${Date.now()}`;
                 const res = await fetch(rawUrl, { headers: { 'Authorization': `token ${token}` } });
                 if (!res.ok) return null;
                 const data = await res.json();
@@ -392,7 +392,7 @@ const Portal = {
     },
 
     async getRepoFile(repo, path, token) {
-        const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+        const url = `https://api.github.com/repos/${repo}/contents/${path}?t=${Date.now()}`;
         const res = await fetch(url, { headers: { 'Authorization': `token ${token}` } });
         if (res.status === 404) return { exists: false, sha: null, text: '' };
         if (!res.ok) {
@@ -423,7 +423,7 @@ const Portal = {
     },
 
     async deleteRepoFile(repo, path, token, message) {
-        const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+        const url = `https://api.github.com/repos/${repo}/contents/${path}?t=${Date.now()}`;
         const getRes = await fetch(url, { headers: { 'Authorization': `token ${token}` } });
         if (getRes.status === 404) return;
         if (!getRes.ok) {
@@ -434,7 +434,7 @@ const Portal = {
         const sha = data && data.sha ? data.sha : null;
         if (!sha) return;
 
-        const delRes = await fetch(url, {
+        const delRes = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
             method: 'DELETE',
             headers: {
                 'Authorization': `token ${token}`,
@@ -462,7 +462,7 @@ const Portal = {
             let sha = null;
             let apps = [];
 
-            const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+            const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}?t=${Date.now()}`;
             const res = await fetch(rawUrl, { headers: { 'Authorization': `token ${token}` } });
 
             if (res.ok) {
@@ -609,9 +609,21 @@ const Portal = {
 
     extractRepoPathFromRawUrl(repo, url) {
         if (!url || typeof url !== 'string') return null;
+        
+        // 1. Raw GitHub URL
         const re = new RegExp(`^https:\\/\\/raw\\.githubusercontent\\.com\\/${repo.replace('/', '\\/')}\\/(main|master)\\/(.+)$`);
         const m = url.match(re);
-        return m ? m[2] : null;
+        if (m) return m[2];
+
+        // 2. GitHub Pages URL
+        const parts = repo.split('/');
+        const owner = parts[0].toLowerCase();
+        const repoName = parts[1].toLowerCase();
+        const pagesRe = new RegExp(`^https:\\/\\/${owner}\\.github\\.io\\/${repoName}\\/(.+)$`, 'i');
+        const m2 = url.match(pagesRe);
+        if (m2) return m2[1];
+
+        return null;
     },
 
     async deleteAppFromRegistry(appId) {
@@ -628,7 +640,7 @@ const Portal = {
 
         const alsoDeleteFiles = !!(this.deleteFilesCheckbox && this.deleteFilesCheckbox.checked);
         const confirmMsg = alsoDeleteFiles
-            ? `Delete "${appId}" from apps.json and delete its ZIP/icon files from the repo?`
+            ? `Delete "${appId}" from apps.json and delete its ZIP/icon/manifest files from the repo?`
             : `Delete "${appId}" from apps.json?`;
         if (!confirm(confirmMsg)) return;
 
@@ -651,9 +663,11 @@ const Portal = {
             if (alsoDeleteFiles && target) {
                 const zipPath = this.extractRepoPathFromRawUrl(repo, target.download_url);
                 const iconPath = this.extractRepoPathFromRawUrl(repo, target.icon);
+                const manifestPath = this.extractRepoPathFromRawUrl(repo, target.manifest_url);
                 const msg = `Delete files for ${appId}`;
                 if (zipPath) await this.deleteRepoFile(repo, zipPath, token, msg);
                 if (iconPath) await this.deleteRepoFile(repo, iconPath, token, msg);
+                if (manifestPath && target.type === 'packaged') await this.deleteRepoFile(repo, manifestPath, token, msg);
             }
 
             const updatedBase64 = this.encodeUnicode(JSON.stringify({ apps: nextApps }, null, 2));
