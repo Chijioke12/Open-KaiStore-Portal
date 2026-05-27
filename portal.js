@@ -13,7 +13,6 @@ const Portal = {
         this.cacheDOM();
         this.bindEvents();
         this.loadConfig();
-        this.registerServiceWorker();
     },
 
     cacheDOM() {
@@ -127,11 +126,6 @@ const Portal = {
             if (installSection) installSection.classList.add('hidden');
             if (androidNote) androidNote.classList.remove('hidden');
         }
-    },
-
-    registerServiceWorker() {
-        if (!('serviceWorker' in navigator)) return;
-        navigator.serviceWorker.register('sw.js').catch(() => {});
     },
 
     async handleFileSelect(file) {
