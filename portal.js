@@ -142,8 +142,17 @@ const Portal = {
         this.showStatus('Extracting metadata...', 'info');
 
         try {
-            const zip = await JSZip.loadAsync(file);
-            const manifestFile = zip.file('manifest.webapp');
+            const outerZip = await JSZip.loadAsync(file);
+            let targetZip = outerZip;
+            
+            // Check for OmniSD nested structure
+            const appZipFile = outerZip.file('application.zip');
+            if (appZipFile) {
+                const appZipBlob = await appZipFile.async('blob');
+                targetZip = await JSZip.loadAsync(appZipBlob);
+            }
+
+            const manifestFile = targetZip.file('manifest.webapp');
             
             if (!manifestFile) {
                 throw new Error('manifest.webapp not found in ZIP');
@@ -167,7 +176,7 @@ const Portal = {
                 const bestIconPath = manifest.icons[iconSizes[0]];
                 // Remove leading slash if present
                 const cleanPath = bestIconPath.startsWith('/') ? (bestIconPath.slice(1)) : bestIconPath;
-                const iconFile = zip.file(cleanPath);
+                const iconFile = targetZip.file(cleanPath);
                 
                 if (iconFile) {
                     const iconBlob = await iconFile.async('blob');
@@ -420,14 +429,6 @@ const Portal = {
     async getUpdatedRegistryData(repo, token, iconUrl, extra) {
         const path = 'apps.json';
 
-        const getPagesManifestUrl = (appId) => {
-            const parts = (repo || '').split('/');
-            if (parts.length !== 2) return '';
-            const owner = parts[0];
-            const repoName = parts[1];
-            return `https://${owner}.github.io/${repoName}/manifests/${appId}.webapp`;
-        };
-
         const fetchAppsJson = async () => {
             const rawUrl = `https://api.github.com/repos/${repo}/contents/${path}?t=${Date.now()}`;
             const res = await fetch(rawUrl, { headers: { 'Authorization': `token ${token}` } });
@@ -444,6 +445,8 @@ const Portal = {
 
         const apps = await fetchAppsJson();
         const appId = this.appMetadata.name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
+        
+        // Construct the clean OmniSD registry entry
         const appEntry = {
             id: appId,
             name: this.appMetadata.name,
@@ -451,12 +454,11 @@ const Portal = {
             description: this.appMetadata.description,
             icon: iconUrl,
             type: extra.type,
-            ...extra
+            ...extra // This brings in the download_url
         };
 
-        if (extra.type === 'packaged' && !appEntry.manifest_url) {
-            appEntry.manifest_url = getPagesManifestUrl(appId);
-        }
+        // REMOVED: No more getPagesManifestUrl assignment here for packaged apps!
+        // Hosted apps will still retain their original manifest_url naturally.
 
         const existingIndex = apps.findIndex(a => a && a.id === appEntry.id);
         if (existingIndex > -1) {
